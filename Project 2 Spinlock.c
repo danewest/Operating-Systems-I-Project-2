@@ -7,6 +7,7 @@
 #include<stdlib.h>
 #include<semaphore.h>
 #include<unistd.h>
+#include<time.h>
 
 int *buffer;
 int buffer_size;
@@ -27,6 +28,9 @@ pthread_spinlock_t spinlock;
 struct thread_struct {
   int id;
 };
+
+struct timespec start, end;
+double elapsed;
 
 void *producer(void *param); 
 void *consumer(void *param); 
@@ -49,6 +53,9 @@ int main(int argc, char *argv[])
   if (buffer == NULL) {
     exit(1);
   }
+
+  // Start tracking time
+  clock_gettime(CLOCK_MONOTONIC, &start);
 
   //semaphore initialization
   sem_init(&empty, 0, buffer_size);
@@ -101,6 +108,16 @@ int main(int argc, char *argv[])
     pthread_join(cons_tids[i], NULL);
   }
 
+  // End of catching time
+  clock_gettime(CLOCK_MONOTONIC, &end);
+
+  // Compute elapsed time following in seconds
+  elapsed = (end.tv_sec - start.tv_sec)
+          + (end.tv_nsec - start.tv_nsec) /1e9;
+  
+  // Print elapsed time
+  printf("Elapsed time: %f seconds\n", elapsed);
+
   free(buffer);
   return 0;
 }
@@ -110,23 +127,25 @@ void *producer(void *param)
   struct thread_struct *args = (struct thread_struct *) param;
 
   while (1) {
+        // Prior to entering the critical section, wait
+        sem_wait(&empty);
+    
         //enter critical section
         pthread_spin_lock(&spinlock);
 
+        // int j and for loop are uncommented when used for testing
+        //int j;
+        //for (j = 0; j < 1000000; j++);
+
         if (next_val > upper_limit) {
             pthread_spin_unlock(&spinlock);
-            pthread_exit(0);
+            sem_post(&empty);
+            break;
         }
 
         //produce and insert in same critical section
         int item = next_val;
         next_val++;
-
-        pthread_spin_unlock(&spinlock);
-
-        //reser buffer slot after produced
-        sem_wait(&empty);
-        pthread_spin_lock(&spinlock);
 
         buffer[write_index] = item;
         write_index = (write_index + 1) % buffer_size;
@@ -134,6 +153,8 @@ void *producer(void *param)
         pthread_spin_unlock(&spinlock);
         sem_post(&full);
     }
+
+    pthread_exit(0);
 }
 
 /* ''consume'' and print value n */
@@ -145,6 +166,9 @@ void *consumer(void *param)
     sem_wait(&full);
     pthread_spin_lock(&spinlock);
 
+    int j;
+    for (j = 0; j < 1000000; j++);
+
     int item = buffer[read_index];
     read_index = (read_index + 1) % buffer_size;
 
@@ -155,6 +179,7 @@ void *consumer(void *param)
       pthread_exit(0);
     }
 
+    // Comment out printf() for testing
     if (item <= upper_limit) {
       printf("%d, %d\n", item, args->id);
     }
